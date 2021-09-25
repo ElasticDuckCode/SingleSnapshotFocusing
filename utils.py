@@ -16,23 +16,53 @@ def ula_measurement_matrix(sensor_count: int, wavelength: float, doa_list: list)
         matrix[:, i] = ula_steering_vector(sensor_count, wavelength, doa)
     return matrix
 
+def build_synthetic_measurements(measurements, manifold_matrix):
+    try:
+        sensor_count, grid_size = manifold_matrix.shape
+        predicted_signal = cp.Variable(shape=grid_size)
+        objective = cp.Minimize(cp.norm1(predicted_signal))
+        constraint = [
+                (manifold_matrix @ predicted_signal)[:len(measurements)] == measurements
+        ]
+        problem = cp.Problem(objective, constraint)
+        problem.solve(solver='SCIPY')
+        predicted_signal = predicted_signal.value
+        syn_measurements = manifold_matrix @ predicted_signal
+    except cp.error.SolverError:
+        return np.zeros(sensor_count), predicted_signal
+    return syn_measurements, predicted_signal
+
+
 
 def fill_hankel_by_rank_minimization(hankel_measurements: np.ndarray, manifold_matrix: np.ndarray,
-        max_iter: int = 1, gamma: float = 0.1, err: float = 0) -> np.ndarray:
-    sensor_count, grid_size = manifold_matrix.shape
-    predicted_signal = cp.Variable(shape=grid_size)
-    hankel_indx = np.nonzero(hankel_measurements)
-    objective = cp.Minimize(cp.norm1(predicted_signal))
-    hankel_matrix = manifold_matrix @ cp.diag(predicted_signal) @ manifold_matrix.T
-    constraint = [
-        #cp.norm2(hankel_matrix[hankel_indx] - hankel_measurements[hankel_indx]) <= err,
-        hankel_matrix[hankel_indx] == hankel_measurements[hankel_indx]
-    ]
-    problem = cp.Problem(objective, constraint)
-    problem.solve(verbose=True)
-    predicted_signal = predicted_signal.value
-    hankel_matrix = manifold_matrix @ np.diag(predicted_signal) @ manifold_matrix.T
-    return hankel_matrix
+        max_iter: int = 1, gamma: float = 1e-1, err: float = 0) -> np.ndarray:
+
+    try:
+        sensor_count, grid_size = manifold_matrix.shape
+        hankel_indx = np.nonzero(hankel_measurements)
+        W = np.ones(grid_size)
+        for i in range(max_iter):
+            predicted_signal = cp.Variable(shape=grid_size)
+            objective = cp.Minimize(cp.norm1(cp.multiply(W, predicted_signal)))
+            hankel_matrix = manifold_matrix @ cp.diag(predicted_signal) @ manifold_matrix.T
+            constraint = [
+                #cp.norm2(hankel_matrix[hankel_indx] - hankel_measurements[hankel_indx]) <= err,
+                hankel_matrix[hankel_indx] == hankel_measurements[hankel_indx]
+            ]
+            problem = cp.Problem(objective, constraint)
+            #problem.solve(verbose=False, solver='SCIPY')
+            problem.solve(verbose=False, solver='ECOS')
+            predicted_signal = predicted_signal.value
+            W = 1 / (np.abs(predicted_signal) + gamma)
+            if i == 0:
+                predicted_it0 = predicted_signal
+            if i % 2 and gamma > 1e-5:
+                gamma /= 10
+        hankel_matrix = manifold_matrix @ np.diag(predicted_signal) @ manifold_matrix.T
+    except cp.error.SolverError:
+        return np.zeros_like(hankel_measurements), predicted_signal, predicted_signal
+
+    return hankel_matrix, predicted_signal, predicted_it0
 
 
 def ula_music(data: np.ndarray, source_count: int, wavelength: float, frequency_list: list) -> np.ndarray:
@@ -68,7 +98,7 @@ def solve_mmv(measurements: np.ndarray, manifold_matrix: np.ndarray, err: float 
         #measurements == manifold_matrix @ predicted_signals
     ]
     problem = cp.Problem(objective, constraints)
-    problem.solve(verbose=False)
+    problem.solve(verbose=False, solver='ECOS')
     
     return predicted_signals.value.T
 
@@ -84,15 +114,18 @@ def solve_l1(measurement: np.ndarray, manifold_matrix: np.ndarray, err: float = 
 
             y = Ax
     '''
-    sensor_count, grid_size = manifold_matrix.shape
-    predicted_signal = cp.Variable(shape=(grid_size))
-    objective = cp.Minimize(cp.norm(predicted_signal, 1))
-    constraints = [
-            cp.norm(measurement - manifold_matrix @ predicted_signal, 2) <= err
-            #measurement == manifold_matrix @ predicted_signal
-    ]
-    problem = cp.Problem(objective, constraints)
-    problem.solve(verbose=False)
+    try:
+        sensor_count, grid_size = manifold_matrix.shape
+        predicted_signal = cp.Variable(shape=(grid_size))
+        objective = cp.Minimize(cp.norm(predicted_signal, 1))
+        constraints = [
+                #cp.norm(measurement - manifold_matrix @ predicted_signal, 2) <= err
+                measurement == manifold_matrix @ predicted_signal
+        ]
+        problem = cp.Problem(objective, constraints)
+        problem.solve(verbose=False, solver='SCIPY')
+    except cp.error.SolverError:
+        return np.zeros(grid_size)
     return predicted_signal.value
 
 
