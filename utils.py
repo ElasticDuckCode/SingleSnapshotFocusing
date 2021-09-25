@@ -18,18 +18,18 @@ def ula_measurement_matrix(sensor_count: int, wavelength: float, doa_list: list)
 
 
 def fill_hankel_by_rank_minimization(hankel_measurements: np.ndarray, manifold_matrix: np.ndarray,
-        max_iter: int = 1, gamma: float = 0.1, err: float = 1e-5) -> np.ndarray:
+        max_iter: int = 1, gamma: float = 0.1, err: float = 0) -> np.ndarray:
     sensor_count, grid_size = manifold_matrix.shape
     predicted_signal = cp.Variable(shape=grid_size)
     hankel_indx = np.nonzero(hankel_measurements)
     objective = cp.Minimize(cp.norm1(predicted_signal))
     hankel_matrix = manifold_matrix @ cp.diag(predicted_signal) @ manifold_matrix.T
     constraint = [
-        cp.norm2(hankel_matrix[hankel_indx] - hankel_measurements[hankel_indx]) <= err,
-        #hankel_matrix[hankel_indx] == hankel_measurements[hankel_indx]
+        #cp.norm2(hankel_matrix[hankel_indx] - hankel_measurements[hankel_indx]) <= err,
+        hankel_matrix[hankel_indx] == hankel_measurements[hankel_indx]
     ]
     problem = cp.Problem(objective, constraint)
-    problem.solve(verbose=False)
+    problem.solve(verbose=True)
     predicted_signal = predicted_signal.value
     hankel_matrix = manifold_matrix @ np.diag(predicted_signal) @ manifold_matrix.T
     return hankel_matrix

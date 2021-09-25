@@ -255,5 +255,5 @@ def test() -> int:
     return 0
 
 if __name__ == "__main__":
-    #sys.exit(test())
-    sys.exit(monte_carlo_experiment())
+    sys.exit(test())
+    #sys.exit(monte_carlo_experiment())
